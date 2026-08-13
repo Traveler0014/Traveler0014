@@ -47,15 +47,15 @@ async function fetchStats() {
   }
   return {
     repos: user.public_repos,
-    sinceYear: user.created_at ? Number(user.created_at.slice(0, 4)) : null,
+    createdAt: user.created_at || null, // ISO 8601，如 2017-03-04T09:11:26Z
     languages: Object.entries(langs).sort((a, b) => b[1] - a[1]),
   };
 }
 
-// 「过去一年 contributions」只有 GraphQL 能拿。CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
-async function fetchContributions() {
-  if (!process.env.GH_TOKEN) return null;
-  const query = `query { user(login: "${USERNAME}") { contributionsCollection { contributionCalendar { totalContributions } } } }`;
+// 自账号创立以来的总提交数，只有 GraphQL 能拿。CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
+async function fetchCommitTotal(createdAt) {
+  if (!process.env.GH_TOKEN || !createdAt) return null;
+  const query = `query { user(login: "${USERNAME}") { contributionsCollection(from: "${createdAt}") { totalCommitContributions } } }`;
   try {
     const res = await fetch('https://api.github.com/graphql', {
       method: 'POST',
@@ -68,7 +68,7 @@ async function fetchContributions() {
     });
     if (!res.ok) return null;
     const json = await res.json();
-    const n = json?.data?.user?.contributionsCollection?.contributionCalendar?.totalContributions;
+    const n = json?.data?.user?.contributionsCollection?.totalCommitContributions;
     return typeof n === 'number' ? n : null;
   } catch {
     return null;
@@ -108,7 +108,7 @@ const FONT =
 // 一句签名（右下角）。随时改词。
 const TAGLINE = 'Explore me as you please — no warranty whatsoever.';
 
-function renderCard(bodies, stats, contributions) {
+function renderCard(bodies, stats, commitTotal) {
   const W = 840;
   const H = 210;
   const R = 16;
@@ -159,12 +159,10 @@ function renderCard(bodies, stats, contributions) {
   // —— 左侧文字遮罩 ——
   p.push(`<rect width="${W}" height="${H}" fill="url(#scrim)"/>`);
 
-  // —— 统计：repos + contributions（本地无 token 时回退为「since 年份」）——
+  // —— 统计：repos + 自账号创立以来的总提交数 ——
   const statsItems = [
     ['REPOS', String(stats.repos)],
-    contributions != null
-      ? ['CONTRIBUTIONS', contributions.toLocaleString('en-US')]
-      : ['SINCE', stats.sinceYear ? String(stats.sinceYear) : '—'],
+    ['COMMITS', commitTotal != null ? commitTotal.toLocaleString('en-US') : '—'],
   ];
   const cols = [40, 240];
   statsItems.forEach(([label, val], i) => {
@@ -175,6 +173,11 @@ function renderCard(bodies, stats, contributions) {
       `<text x="${cols[i]}" y="108" font-family="${FONT}" font-size="10" font-weight="500" letter-spacing="2.5" fill="#7d8590">${label}</text>`
     );
   });
+  if (stats.createdAt) {
+    p.push(
+      `<text x="240" y="126" font-family="${FONT}" font-size="9" fill="#6e7781">since ${stats.createdAt.slice(0, 10)}</text>`
+    );
+  }
 
   // —— 语言：标签 + 比例条 + 图例 ——
   p.push(
@@ -217,7 +220,7 @@ function renderCard(bodies, stats, contributions) {
 
 const now = new Date();
 const stats = await fetchStats();
-const contributions = await fetchContributions();
+const commitTotal = await fetchCommitTotal(stats.createdAt);
 
 const passphrase = process.env.SKY_PASSPHRASE;
 if (!passphrase) throw new Error('缺少环境变量 SKY_PASSPHRASE（星空解密口令）');
@@ -232,10 +235,10 @@ const bodies = sky.computeSky(now, {
   maxStars: MAX_STARS,
 });
 
-writeFileSync(join(ROOT, 'card.svg'), renderCard(bodies, stats, contributions));
+writeFileSync(join(ROOT, 'card.svg'), renderCard(bodies, stats, commitTotal));
 
 console.log('已生成 card.svg');
-console.log(`repos: ${stats.repos} · contributions(1y): ${contributions ?? '不可用，回退 since'} · since: ${stats.sinceYear}`);
+console.log(`repos: ${stats.repos} · commits(since ${stats.createdAt?.slice(0, 10)}): ${commitTotal ?? '不可用（需 GH_TOKEN）'}`);
 console.log(
   `langs: ${stats.languages.slice(0, 6).map(([l, n]) => `${l}:${n}`).join(', ')}`
 );
