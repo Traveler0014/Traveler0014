@@ -1,0 +1,17 @@
+{
+  "name": "traveler0014-profile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "构建期生成 README 的统计卡片与星空横幅。星空代码以密文提交，口令存于 Secrets。",
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "encrypt": "node scripts/encrypt.mjs"
+  },
+  "dependencies": {
+    "astronomy-engine": "^2.1.19"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

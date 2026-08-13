@@ -1,0 +1,7 @@
+node_modules/
+
+# 明文载荷模板（含真实坐标/留言），绝不能提交——只提交它的密文 sky.enc
+scripts/sky.template.js
+
+# 运行时解密出的临时文件
+scripts/.decrypted-*.mjs

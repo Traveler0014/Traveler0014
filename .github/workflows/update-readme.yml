@@ -1,0 +1,54 @@
+name: update-readme
+
+on:
+  schedule:
+    # 每天 21:30（东八区）＝ UTC 13:30。改频率只需改这里。
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/update-readme.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate stats & sky
+        run: npm run generate
+        env:
+          # 星空解密口令：scrypt 派生出 AES 密钥
+          SKY_PASSPHRASE: ${{ secrets.SKY_PASSPHRASE }}
+          # 观测点（我）→ 目标（你）经纬度，以及取景窗参数（缺省用 generate.mjs 内的默认值）
+          SKY_OBS_LAT: ${{ secrets.SKY_OBS_LAT }}
+          SKY_OBS_LON: ${{ secrets.SKY_OBS_LON }}
+          SKY_TGT_LAT: ${{ secrets.SKY_TGT_LAT }}
+          SKY_TGT_LON: ${{ secrets.SKY_TGT_LON }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add card.svg
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "chore: refresh stars & sky"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
