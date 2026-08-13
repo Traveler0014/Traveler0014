@@ -181,7 +181,7 @@ function renderCard(bodies, stats, contributionTotal) {
   // —— 统计：repos + 总 contributions + since（三列，同样式）——
   const statsItems = [
     ['REPOS', String(stats.repos)],
-    ['COMMITS', contributionTotal != null ? contributionTotal.toLocaleString('en-US') : '—'],
+    ['CONTRIBUTIONS', contributionTotal != null ? contributionTotal.toLocaleString('en-US') : '—'],
     ['SINCE', stats.createdAt ? stats.createdAt.slice(0, 10) : '—'],
   ];
   const cols = [40, 240, 460];
