@@ -53,7 +53,8 @@ async function fetchStats() {
 }
 
 // 自账号创立以来的「contributions」总和（GitHub 绿格子口径，即 profile 逐年可见的统计）。
-// contributionCalendar 单次只支持约一年，故逐年查询再累加；CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
+// contributionCalendar 单次只支持约一年，故按半年段查询再累加（避开闰年 366 天超限）；
+// CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
 async function fetchContributionTotal(createdAt) {
   if (!process.env.GH_TOKEN || !createdAt) return null;
   const startYear = Number(createdAt.slice(0, 4));
@@ -61,28 +62,33 @@ async function fetchContributionTotal(createdAt) {
   let total = 0;
   let any = false;
   for (let y = startYear; y <= endYear; y++) {
-    const from = y === startYear ? createdAt : `${y}-01-01T00:00:00Z`;
-    const to = y === endYear ? new Date().toISOString() : `${y}-12-31T23:59:59Z`;
-    const query = `query { user(login: "${USERNAME}") { contributionsCollection(from: "${from}", to: "${to}") { contributionCalendar { totalContributions } } } }`;
-    try {
-      const res = await fetch('https://api.github.com/graphql', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.GH_TOKEN}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'traveler0014-profile',
-        },
-        body: JSON.stringify({ query }),
-      });
-      if (!res.ok) continue;
-      const json = await res.json();
-      const n = json?.data?.user?.contributionsCollection?.contributionCalendar?.totalContributions;
-      if (typeof n === 'number') {
-        total += n;
-        any = true;
+    const ranges = [
+      { from: y === startYear ? createdAt : `${y}-01-01T00:00:00Z`, to: `${y}-06-30T23:59:59Z` },
+      { from: `${y}-07-01T00:00:00Z`, to: y === endYear ? new Date().toISOString() : `${y}-12-31T23:59:59Z` },
+    ];
+    for (const { from, to } of ranges) {
+      if (from >= to) continue;
+      const query = `query { user(login: "${USERNAME}") { contributionsCollection(from: "${from}", to: "${to}") { contributionCalendar { totalContributions } } } }`;
+      try {
+        const res = await fetch('https://api.github.com/graphql', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.GH_TOKEN}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'traveler0014-profile',
+          },
+          body: JSON.stringify({ query }),
+        });
+        if (!res.ok) continue;
+        const json = await res.json();
+        const n = json?.data?.user?.contributionsCollection?.contributionCalendar?.totalContributions;
+        if (typeof n === 'number') {
+          total += n;
+          any = true;
+        }
+      } catch {
+        // 忽略单个区间失败，继续下一个
       }
-    } catch {
-      // 忽略单年失败，继续下一年
     }
   }
   return any ? total : null;
@@ -172,12 +178,13 @@ function renderCard(bodies, stats, contributionTotal) {
   // —— 左侧文字遮罩 ——
   p.push(`<rect width="${W}" height="${H}" fill="url(#scrim)"/>`);
 
-  // —— 统计：repos + 自账号创立以来的总提交数 ——
+  // —— 统计：repos + 总 contributions + since（三列，同样式）——
   const statsItems = [
     ['REPOS', String(stats.repos)],
     ['COMMITS', contributionTotal != null ? contributionTotal.toLocaleString('en-US') : '—'],
+    ['SINCE', stats.createdAt ? stats.createdAt.slice(0, 10) : '—'],
   ];
-  const cols = [40, 240];
+  const cols = [40, 240, 460];
   statsItems.forEach(([label, val], i) => {
     p.push(
       `<text x="${cols[i]}" y="86" font-family="${FONT}" font-size="34" font-weight="300" fill="#f0f6fc">${val}</text>`
@@ -186,11 +193,6 @@ function renderCard(bodies, stats, contributionTotal) {
       `<text x="${cols[i]}" y="108" font-family="${FONT}" font-size="10" font-weight="500" letter-spacing="2.5" fill="#7d8590">${label}</text>`
     );
   });
-  if (stats.createdAt) {
-    p.push(
-      `<text x="240" y="126" font-family="${FONT}" font-size="9" fill="#6e7781">since ${stats.createdAt.slice(0, 10)}</text>`
-    );
-  }
 
   // —— 语言：标签 + 比例条 + 图例 ——
   p.push(
