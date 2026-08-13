@@ -52,27 +52,40 @@ async function fetchStats() {
   };
 }
 
-// 自账号创立以来的总提交数，只有 GraphQL 能拿。CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
-async function fetchCommitTotal(createdAt) {
+// 自账号创立以来的「contributions」总和（GitHub 绿格子口径，即 profile 逐年可见的统计）。
+// contributionCalendar 单次只支持约一年，故逐年查询再累加；CI 里有 GITHUB_TOKEN，本地无 token 则返回 null。
+async function fetchContributionTotal(createdAt) {
   if (!process.env.GH_TOKEN || !createdAt) return null;
-  const query = `query { user(login: "${USERNAME}") { contributionsCollection(from: "${createdAt}") { totalCommitContributions } } }`;
-  try {
-    const res = await fetch('https://api.github.com/graphql', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.GH_TOKEN}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'traveler0014-profile',
-      },
-      body: JSON.stringify({ query }),
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const n = json?.data?.user?.contributionsCollection?.totalCommitContributions;
-    return typeof n === 'number' ? n : null;
-  } catch {
-    return null;
+  const startYear = Number(createdAt.slice(0, 4));
+  const endYear = new Date().getUTCFullYear();
+  let total = 0;
+  let any = false;
+  for (let y = startYear; y <= endYear; y++) {
+    const from = y === startYear ? createdAt : `${y}-01-01T00:00:00Z`;
+    const to = y === endYear ? new Date().toISOString() : `${y}-12-31T23:59:59Z`;
+    const query = `query { user(login: "${USERNAME}") { contributionsCollection(from: "${from}", to: "${to}") { contributionCalendar { totalContributions } } } }`;
+    try {
+      const res = await fetch('https://api.github.com/graphql', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.GH_TOKEN}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'traveler0014-profile',
+        },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const n = json?.data?.user?.contributionsCollection?.contributionCalendar?.totalContributions;
+      if (typeof n === 'number') {
+        total += n;
+        any = true;
+      }
+    } catch {
+      // 忽略单年失败，继续下一年
+    }
   }
+  return any ? total : null;
 }
 
 // ============================== 卡片渲染 ==============================
@@ -108,7 +121,7 @@ const FONT =
 // 一句签名（右下角）。随时改词。
 const TAGLINE = 'Explore me as you please — no warranty whatsoever.';
 
-function renderCard(bodies, stats, commitTotal) {
+function renderCard(bodies, stats, contributionTotal) {
   const W = 840;
   const H = 210;
   const R = 16;
@@ -162,7 +175,7 @@ function renderCard(bodies, stats, commitTotal) {
   // —— 统计：repos + 自账号创立以来的总提交数 ——
   const statsItems = [
     ['REPOS', String(stats.repos)],
-    ['COMMITS', commitTotal != null ? commitTotal.toLocaleString('en-US') : '—'],
+    ['COMMITS', contributionTotal != null ? contributionTotal.toLocaleString('en-US') : '—'],
   ];
   const cols = [40, 240];
   statsItems.forEach(([label, val], i) => {
@@ -220,7 +233,7 @@ function renderCard(bodies, stats, commitTotal) {
 
 const now = new Date();
 const stats = await fetchStats();
-const commitTotal = await fetchCommitTotal(stats.createdAt);
+const contributionTotal = await fetchContributionTotal(stats.createdAt);
 
 const passphrase = process.env.SKY_PASSPHRASE;
 if (!passphrase) throw new Error('缺少环境变量 SKY_PASSPHRASE（星空解密口令）');
@@ -235,10 +248,10 @@ const bodies = sky.computeSky(now, {
   maxStars: MAX_STARS,
 });
 
-writeFileSync(join(ROOT, 'card.svg'), renderCard(bodies, stats, commitTotal));
+writeFileSync(join(ROOT, 'card.svg'), renderCard(bodies, stats, contributionTotal));
 
 console.log('已生成 card.svg');
-console.log(`repos: ${stats.repos} · commits(since ${stats.createdAt?.slice(0, 10)}): ${commitTotal ?? '不可用（需 GH_TOKEN）'}`);
+console.log(`repos: ${stats.repos} · contributions(since ${stats.createdAt?.slice(0, 10)}): ${contributionTotal ?? '不可用（需 GH_TOKEN）'}`);
 console.log(
   `langs: ${stats.languages.slice(0, 6).map(([l, n]) => `${l}:${n}`).join(', ')}`
 );
